@@ -1,0 +1,16 @@
+{
+  "_comment": "Officials missing from openstates/people, in the same format. Every entry needs a source. Remove an entry once openstates adds the person.",
+  "people": [
+    {
+      "id": "ocd-person/curated-co-treasurer-dave-young",
+      "name": "Dave Young",
+      "given_name": "Dave",
+      "family_name": "Young",
+      "party": [{"name": "Democratic"}],
+      "roles": [{"type": "treasurer", "start_date": "2019-01-08", "end_date": "2027-01-12",
+                 "jurisdiction": "ocd-jurisdiction/country:us/state:co/government"}],
+      "links": [{"url": "https://treasury.colorado.gov/"}],
+      "sources": [{"url": "https://ballotpedia.org/Dave_Young_(Colorado_Treasurer)"}]
+    }
+  ]
+}

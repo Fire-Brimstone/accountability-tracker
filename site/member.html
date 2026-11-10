@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Official Record</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site"><div class="wrap">
+  <h1><a href="index.html">Public Record Monitor</a></h1>
+  <nav><a href="index.html">Officials</a><a href="methodology.html">Methodology</a></nav>
+</div></header>
+
+<main class="wrap" id="app"><p class="muted">Loading…</p></main>
+<footer><div class="wrap"></div></footer>
+
+<script type="module">
+import { $, esc, money, moneyFull, pct, partyLetter, seat, getJSON, footer } from "./common.js";
+
+const id = new URLSearchParams(location.search).get("id");
+const app = $("#app");
+let m, bills;
+try {
+  [m, bills] = await Promise.all([getJSON(`data/members/${id}.json`), getJSON("data/bills.json")]);
+} catch {
+  app.innerHTML = `<p class="empty">No official found for “${esc(id)}”. <a href="index.html">Back to the list</a>.</p>`;
+  throw new Error("not found");
+}
+document.title = `${m.name} — Public Record`;
+
+const statementsByBill = {};
+for (const s of m.statements) (statementsByBill[s.bill] ||= []).push(s);
+
+const vs = m.vote_stats || {};
+const leg = m.legislation;
+const fc = m.fact_check_counts;
+const mon = m.money;
+const P = partyLetter(m.party);
+const isFederal = (m.level || "federal") === "federal";
+const noMoneyReason = m.chamber === "mayor"
+  ? "City candidates file with their city clerk, not the state — city campaign finance isn't imported yet"
+  : isFederal ? "No FEC campaign committee is on file for this member yet (common for newly sworn-in members)"
+  : "No candidate-committee filings matched this official in Colorado TRACER";
+const noVotesReason = m.chamber === "mayor" || m.chamber === "executive"
+  ? "This office doesn't cast legislative votes."
+  : isFederal ? "No roll-call votes on file." : "State legislative votes aren't available yet.";
+
+app.innerHTML = `
+  <section class="profile">
+    <img src="${m.photo}" alt="${esc(m.name)}" onerror="this.style.visibility='hidden'">
+    <div>
+      <h2>${esc(m.name)}</h2>
+      <div><span class="party-${P}"><b>${esc(m.party)}</b></span> · ${esc(m.seat || seat(m))}${m.title ? ` · ${esc(m.title)}` : ""}
+        ${m.since ? ` · in office since ${m.since.slice(0, 4)}` : ""}${m.term_end ? ` · term ends ${m.term_end}` : ""}</div>
+      <div class="links">
+        ${m.website ? `<a href="${m.website}" rel="noopener">Official site</a>` : ""}
+        ${isFederal ? `
+          <a href="https://www.congress.gov/member/${m.id}" rel="noopener">Congress.gov</a>
+          ${mon ? `<a href="${mon.fec_url}" rel="noopener">FEC filings</a>` : m.ids.fec?.[0] ? `<a href="https://www.fec.gov/data/candidate/${m.ids.fec.at(-1)}/" rel="noopener">FEC filings</a>` : ""}
+          ${m.ids.opensecrets ? `<a href="https://www.opensecrets.org/members-of-congress/summary?cid=${m.ids.opensecrets}" rel="noopener">OpenSecrets</a>` : ""}
+          <a href="https://voteview.com/person/${m.ids.icpsr}" rel="noopener">Voteview</a>
+          ${m.ids.wikipedia ? `<a href="https://en.wikipedia.org/wiki/${encodeURIComponent(m.ids.wikipedia)}" rel="noopener">Wikipedia</a>` : ""}`
+        : (m.links || []).slice(1).map((l) => `<a href="${l.url}" rel="noopener">${esc(l.label)}</a>`).join("")}
+        ${mon?.source === "tracer" ? `<a href="${mon.source_url}" rel="noopener">TRACER filings</a>` : ""}
+        ${m.phone ? `<span class="muted">☎ ${esc(m.phone)}</span>` : ""}
+      </div>
+    </div>
+  </section>
+
+  <section class="tiles">
+    <div class="tile"><div class="k">Missed votes</div><div class="v">${pct(vs.missed_pct)}</div>
+      <div class="s">${vs.missed ?? "—"} of ${vs.eligible ?? "—"} roll calls</div></div>
+    <div class="tile"><div class="k">Votes with party</div><div class="v">${pct(vs.party_pct)}</div>
+      <div class="s">on yes/no votes where their party took a side</div></div>
+    <div class="tile"><div class="k">Bills sponsored</div><div class="v">${leg ? leg.counts.sponsored : "—"}</div>
+      <div class="s">${leg ? `${leg.counts.sponsored_law} became law · ${leg.counts.cosponsored} cosponsored` : "not loaded yet"}</div></div>
+    <div class="tile"><div class="k">Raised${mon ? ` (${mon.cycle_label || `${mon.cycle - 1}–${mon.cycle}`})` : ""}</div><div class="v">${mon ? money(mon.totals.receipts) : "—"}</div>
+      <div class="s">${mon ? `${share(mon, "pac")} from PACs · ${share(mon, "individual", "small")} from individuals` : noMoneyReason}</div></div>
+    <div class="tile ${fc.false ? "alert" : ""}"><div class="k">Rated false by fact-checkers</div><div class="v">${fc.checked ? fc.false : "—"}</div>
+      <div class="s">${fc.checked ? `of ${fc.checked} statements checked · ${fc.misleading} misleading` : "no fact-checks on file"}</div></div>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    ${["votes:Votes", "bills:Legislation", "money:Money", "facts:Fact-checks", "said:Statements"].map((t) => {
+      const [k, label] = t.split(":"); return `<button role="tab" data-tab="${k}">${label}</button>`; }).join("")}
+  </nav>
+  <section class="panel" id="panel"></section>
+`;
+
+// Older FEC records predate the shared "composition" list; derive it from FEC totals.
+function composition(mon) {
+  if (mon.composition) return mon.composition;
+  const t = mon.totals;
+  return [
+    { label: "Small donors (≤$200)", amount: t.individual_unitemized, kind: "small" },
+    { label: "Larger individual donors", amount: t.individual_itemized, kind: "individual" },
+    { label: "PACs & other committees", amount: t.pac, kind: "pac" },
+    { label: "Party committees", amount: t.party, kind: "party" },
+    { label: "Candidate's own money", amount: t.self + t.loans, kind: "self" },
+    { label: "Transfers from own committees", amount: t.transfers, kind: "transfer" },
+  ];
+}
+function share(mon, ...kinds) {
+  const parts = composition(mon).filter((p) => p.amount > 0);
+  const sum = parts.reduce((a, p) => a + p.amount, 0);
+  const part = parts.filter((p) => kinds.includes(p.kind)).reduce((a, p) => a + p.amount, 0);
+  return sum ? Math.round((100 * part) / sum) + "%" : "—";
+}
+
+function billExtras(billId) {
+  if (!billId) return "";
+  const eff = bills[billId]?.effects || [];
+  const st = statementsByBill[billId] || [];
+  if (!eff.length && !st.length) return "";
+  return `<details class="small"><summary>${st.length ? `${st.length} statement${st.length > 1 ? "s" : ""}` : ""}${st.length && eff.length ? " · " : ""}${eff.length ? `${eff.length} documented effect${eff.length > 1 ? "s" : ""}` : ""}</summary>
+    ${st.map(statementHTML).join("")}
+    ${eff.map(effectHTML).join("")}
+  </details>`;
+}
+const statementHTML = (s) => `<blockquote>“${esc(s.quote)}”</blockquote>
+  <div class="small muted">${esc(s.date)}${s.context ? " · " + esc(s.context) : ""} · <a href="${s.source_url}" rel="noopener">source</a></div>`;
+const effectHTML = (e) => `<div class="effect ${e.kind}"><b>${e.kind === "measured" ? "Measured effect" : "Projected effect"}:</b> ${esc(e.summary)}
+  <div class="muted">${esc(e.source_name)}${e.date ? ", " + esc(e.date) : ""} · <a href="${e.source_url}" rel="noopener">source</a></div></div>`;
+
+// ---------------------------------------------------------------- tabs
+const tabs = {
+  async votes(el) {
+    const keys = Object.keys(m.votes || {}).sort().reverse();
+    if (!keys.length) { el.innerHTML = `<p class="empty">${noVotesReason}</p>`; return; }
+    const rc = Object.fromEntries(await Promise.all(keys.map(async (k) => [k, (await getJSON(`data/rollcalls/${k}.json`)).rollcalls])));
+    const all = [];
+    for (const k of keys) {
+      const pos = m.votes[k];
+      rc[k].forEach((r, i) => {
+        if (!r || pos[i] === "-" || pos[i] === undefined) return;
+        const pm = r.party[P === "I" ? (m.caucus === "Republican" ? "R" : "D") : P];
+        all.push({ ...r, key: k, pos: pos[i], against: pm && "YN".includes(pos[i]) && pos[i] !== pm });
+      });
+    }
+    all.sort((a, b) => (b.date + String(b.roll).padStart(5, "0")).localeCompare(a.date + String(a.roll).padStart(5, "0")));
+    el.innerHTML = `
+      <div class="controls">
+        <input type="search" id="vq" placeholder="Search votes by bill number or topic (e.g. “H.R. 1”, “border”, “tax”)">
+        <select id="vpos"><option value="">All positions</option><option value="Y">Yea</option><option value="N">Nay</option><option value="X">Missed</option><option value="P">Present</option></select>
+        <select id="vbill"><option value="">All votes</option><option value="bill">Votes on bills only</option><option value="passage">Final passage only</option></select>
+        <label class="small"><input type="checkbox" id="vagainst"> Broke with party</label>
+      </div>
+      <p class="small muted" id="vcount"></p>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Vote</th><th class="hide-sm">Result</th><th>Their vote</th></tr></thead><tbody id="vbody"></tbody></table></div>
+      <p><button id="vmore">Show more</button></p>
+      <p class="small muted">Source: ${isFederal ? `<a href="https://voteview.com">Voteview</a> (compiled from House Clerk and Senate roll calls)` : `<a href="https://open.pluralpolicy.com/">Open States</a> (floor votes scraped from the legislature's journals; committee votes not included)`}. Party majority is computed from the votes cast by each party's members.</p>`;
+    let shown = 100;
+    const render = () => {
+      const q = $("#vq").value.trim().toLowerCase().replace(/\s+/g, " ");
+      const qn = q.replace(/[.\s]/g, "");
+      const isBillQ = /^(h|s)[a-z.\s]{0,10}\d+$/.test(q);
+      const pos = $("#vpos").value, kind = $("#vbill").value, against = $("#vagainst").checked;
+      const list = all.filter((v) =>
+        (!pos || v.pos === pos) && (!against || v.against) &&
+        (!kind || (kind === "bill" ? v.bill : /pass/i.test(v.question) && v.bill)) &&
+        (!q || (isBillQ ? v.bill && v.bill.label.toLowerCase().replace(/[.\s]/g, "") === qn
+                         : (v.desc + " " + v.question).toLowerCase().includes(q))));
+      $("#vcount").textContent = `${list.length} votes`;
+      $("#vbody").innerHTML = list.slice(0, shown).map((v) => `<tr>
+        <td class="small" style="white-space:nowrap">${v.date}<br><span class="muted">${v.key} #${v.roll}</span></td>
+        <td>${v.bill ? `<a href="${v.bill.url}" rel="noopener"><b>${esc(v.bill.label)}</b></a> · ` : ""}${esc(v.desc || "—")}
+          <div class="small muted">${esc(v.question)}</div>${billExtras(v.bill?.id)}</td>
+        <td class="small hide-sm">${esc(v.result)}<br><span class="muted">${v.yea}–${v.nay}</span></td>
+        <td><span class="pos pos-${v.pos}">${{ Y: "Yea", N: "Nay", P: "Present", X: "Missed" }[v.pos]}</span>${v.against ? `<div class="small b-misleading">against party</div>` : ""}</td>
+      </tr>`).join("") || `<tr><td colspan="4" class="empty">No votes match.</td></tr>`;
+      $("#vmore").style.display = list.length > shown ? "" : "none";
+    };
+    ["vq", "vpos", "vbill", "vagainst"].forEach((i) => $("#" + i).addEventListener("input", () => { shown = 100; render(); }));
+    $("#vmore").onclick = () => { shown += 200; render(); };
+    render();
+  },
+
+  bills(el) {
+    if (!leg) { el.innerHTML = `<p class="empty">${m.chamber === "mayor" || m.chamber === "executive" ? "This office doesn't sponsor legislation." : isFederal ? "No bills found for this member in the 118th–119th Congress." : "State bills aren't available yet."}</p>`; return; }
+    el.innerHTML = `
+      <div class="controls">
+        <button data-k="sponsored" class="active">Wrote (sponsored) · ${leg.counts.sponsored}</button>
+        <button data-k="cosponsored">Championed (cosponsored) · ${leg.counts.cosponsored}</button>
+        <input type="search" id="bq" placeholder="Search titles or policy area">
+        <label class="small"><input type="checkbox" id="blaw"> Became law only</label>
+      </div>
+      <p class="small muted" id="bcount"></p>
+      <div class="table-wrap"><table><thead><tr><th>Bill</th><th>Title & status</th><th class="hide-sm">Introduced</th></tr></thead><tbody id="bbody"></tbody></table></div>
+      <p><button id="bmore">Show more</button></p>
+      <p class="small muted">Source: ${isFederal ? `<a href="https://api.congress.gov">Congress.gov API</a>. Cost estimates from the Congressional Budget Office where available.` : `<a href="https://open.pluralpolicy.com/">Open States</a>. In Colorado, "sponsored" means a prime sponsor in either chamber.`}</p>`;
+    let which = "sponsored", shown = 100;
+    const render = () => {
+      const q = $("#bq").value.trim().toLowerCase(), law = $("#blaw").checked;
+      const list = leg[which].filter((b) => (!law || b.became_law) && (!q || `${b.title} ${b.policy_area} ${b.label}`.toLowerCase().includes(q)));
+      $("#bcount").textContent = `${list.length} bills`;
+      $("#bbody").innerHTML = list.slice(0, shown).map((b) => `<tr>
+        <td style="white-space:nowrap"><a href="${b.url}" rel="noopener"><b>${esc(b.label)}</b></a><div class="small muted">${b.congress ? b.congress + "th" : esc(b.session || "")}</div></td>
+        <td>${esc(b.title)} ${b.vetoed ? `<span class="chip b-false">vetoed</span>` : ""} ${b.became_law ? `<span class="chip b-true">became law${b.laws?.length ? " · " + esc(b.laws.join(", ")) : ""}</span>` : ""}
+          ${b.policy_area ? `<span class="chip">${esc(b.policy_area)}</span>` : ""}
+          <div class="small muted">${esc(b.latest_action_date || "")} — ${esc(b.latest_action)}</div>
+          ${b.cbo?.length ? `<div class="small">CBO: ${b.cbo.map((c) => `<a href="${c.url}" rel="noopener">${esc(c.title || "cost estimate")}</a>`).join(" · ")}</div>` : ""}
+          ${billExtras(b.id)}</td>
+        <td class="small hide-sm">${esc(b.introduced || "")}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">No bills match.</td></tr>`;
+      $("#bmore").style.display = list.length > shown ? "" : "none";
+    };
+    el.querySelectorAll("button[data-k]").forEach((b) => b.onclick = () => {
+      el.querySelectorAll("button[data-k]").forEach((x) => x.classList.toggle("active", x === b));
+      which = b.dataset.k; shown = 100; render();
+    });
+    $("#bq").oninput = $("#blaw").oninput = () => { shown = 100; render(); };
+    $("#bmore").onclick = () => { shown += 200; render(); };
+    render();
+  },
+
+  money(el) {
+    if (!mon) { el.innerHTML = `<p class="empty">${noMoneyReason}.</p>`; return; }
+    const t = mon.totals;
+    const COLORS = { small: "#5b8fc7", individual: "#2f5d8a", sdc: "#3f8f8a", pac: "#b7791f", party: "#6d5a9c",
+                     self: "#6b6b66", transfer: "#9c9b95", business: "#a0522d", union: "#7a6a2f", other: "#bdbcb6" };
+    const parts = composition(mon).filter((p) => p.amount > 0).map((p) => [p.label, p.amount, COLORS[p.kind] || "#bdbcb6"]);
+    const maxOcc = Math.max(...(mon.top_occupations || []).map((s) => s.total), 1);
+    const isFec = mon.source !== "tracer";
+    const sum = parts.reduce((a, p) => a + p[1], 0) || 1;
+    const maxSize = Math.max(...mon.by_size.map((s) => s.total), 1);
+    const maxState = Math.max(...mon.top_states.map((s) => s.total), 1);
+    const maxEmp = Math.max(...mon.top_employers.map((s) => s.total), 1);
+    el.innerHTML = `
+      <div class="card">
+        <div><b>${moneyFull(t.receipts)}</b> raised in the ${mon.cycle_label || `${mon.cycle - 1}–${mon.cycle}`} cycle by
+          ${esc((mon.committees || [mon.committee]).filter(Boolean).map((c) => c.name).join(", ") || "their campaign")}
+          <span class="muted small">(latest gift ${esc(mon.coverage_end)})</span></div>
+        <div class="bar">${parts.map((p) => `<span style="width:${(100 * p[1]) / sum}%;background:${p[2]}" title="${p[0]}: ${moneyFull(p[1])}"></span>`).join("")}</div>
+        <div class="legend">${parts.map((p) => `<span><i style="background:${p[2]}"></i>${p[0]}: <b>${money(p[1])}</b> (${Math.round((100 * p[1]) / sum)}%)</span>`).join("")}</div>
+        <p class="small muted">${isFec ? `Spent ${moneyFull(t.disbursements)} · cash on hand ${moneyFull(t.cash_on_hand)} · ` : ""}${mon.home_state_pct != null ? `${mon.home_state_pct}% of itemized individual money came from ${m.state}` : ""}
+          ${mon.all_cycles?.length > 1 ? `<br>Other cycles: ${mon.all_cycles.filter((c) => c.cycle !== mon.cycle).map((c) => `${c.cycle - 1}–${c.cycle}: ${money(c.total)}`).join(" · ")}` : ""}</p>
+      </div>
+      <div class="grid2" style="margin-top:14px">
+        <div class="card"><h3 style="margin-top:0">Donations by size</h3>
+          <table>${mon.by_size.map((s) => `<tr><td class="small">${esc(s.label)}</td><td style="width:40%"><div class="hbar" style="width:${(100 * s.total) / maxSize}%"></div></td><td class="num small">${money(s.total)}</td></tr>`).join("")}</table></div>
+        ${mon.top_states.length ? `<div class="card"><h3 style="margin-top:0">Top donor states</h3>
+          <table>${mon.top_states.map((s) => `<tr><td class="small">${s.state === m.state ? `<b>${s.state}</b> (home)` : s.state}</td><td style="width:50%"><div class="hbar" style="width:${(100 * s.total) / maxState}%"></div></td><td class="num small">${money(s.total)}</td></tr>`).join("")}</table></div>` : ""}
+      </div>
+      ${!mon.top_employers.length && isFec ? `<p class="small muted">Donor states and employers come from the FEC's itemized-contributions file (about 2.5 GB), which is processed weekly; they aren't in this build yet.</p>` : `
+      <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Top donor employers</h3>
+        <p class="small muted">Money from <em>employees</em> of these organizations (as donors reported it), not from the organizations themselves${isFec ? " — corporations can't give directly to federal candidates" : ""}.</p>
+        <table>${mon.top_employers.map((s) => `<tr><td class="small">${esc(s.employer)}</td><td style="width:40%"><div class="hbar" style="width:${(100 * s.total) / maxEmp}%"></div></td><td class="num small">${money(s.total)}</td><td class="num small muted hide-sm">${s.count} gifts</td></tr>`).join("") || `<tr><td class="empty">No employer data.</td></tr>`}</table></div>`}
+      ${mon.top_occupations?.length ? `<div class="card" style="margin-top:14px"><h3 style="margin-top:0">Donors by occupation category</h3>
+        <table>${mon.top_occupations.map((s) => `<tr><td class="small">${esc(s.occupation)}</td><td style="width:50%"><div class="hbar" style="width:${(100 * s.total) / maxOcc}%"></div></td><td class="num small">${money(s.total)}</td></tr>`).join("")}</table></div>` : ""}
+      <p class="small muted">${isFec
+        ? `Source: <a href="${mon.fec_url}" rel="noopener">Federal Election Commission</a>, candidate ${esc(mon.candidate_id)}. Outside spending by super PACs is not included yet.`
+        : `Source: <a href="${mon.source_url}" rel="noopener">${esc(mon.source_name)}</a> bulk contribution data, committee ID${mon.committees?.length > 1 ? "s" : ""} ${esc((mon.committees || []).map((c) => c.id).join(", "))}.
+           Matched to filings under the name${mon.matched_names?.length > 1 ? "s" : ""} ${esc((mon.matched_names || []).join(", "))} — if that's the wrong person, please report it.
+           ${esc(mon.employer_note || "")}`}</p>`;
+  },
+
+  facts(el) {
+    const list = m.fact_checks;
+    el.innerHTML = `
+      <div class="notice"><b>How to read this.</b> The count includes only statements the official made themselves that an
+        <a href="https://ifcncodeofprinciples.poynter.org/">IFCN-verified</a> fact-checker rated False, Pants on Fire, or 3–4 Pinocchios.
+        All fact-checks are listed — including ones rated true — so nothing is cherry-picked. Fact-checkers choose what to check
+        and focus on prominent officials, so a low number can mean “rarely checked,” not “always accurate.”
+        <a href="methodology.html#6-false-claims-count-lie-count">Full methodology</a>.</div>
+      <div class="tiles">
+        ${[["false", "Rated false"], ["misleading", "Misleading / half-true"], ["true", "Rated true"], ["other", "Other ratings"]].map(([k, l]) =>
+          `<div class="tile"><div class="k">${l}</div><div class="v b-${k}">${fc[k]}</div></div>`).join("")}
+      </div>
+      <div class="controls">${["", "false", "misleading", "true", "other"].map((b) => `<button data-b="${b}" class="${b ? "" : "active"}">${b || "All"}</button>`).join("")}</div>
+      <div id="flist"></div>`;
+    const render = (b) => {
+      const l = list.filter((x) => !b || x.bucket === b);
+      $("#flist").innerHTML = l.map((x) => `<div class="card" style="margin-bottom:10px">
+        <div><span class="rating b-${x.bucket}">${esc(x.rating)}</span> <span class="muted small">— ${esc(x.publisher)}, ${esc(x.date)}</span></div>
+        <blockquote>${esc(x.claim)}</blockquote>
+        ${x.explanation ? `<div class="small">${esc(x.explanation)}</div>` : ""}
+        ${x.also_checked_by?.length ? `<div class="small" style="margin-top:6px">Same statement also checked by: ${x.also_checked_by.map((a) =>
+          `<a href="${a.url}" rel="noopener">${esc(a.publisher)}</a> — <span class="rating b-${a.bucket}">${esc(a.rating)}</span>`).join(" · ")} <span class="muted">(counted once)</span></div>` : ""}
+        <div class="small"><a href="${x.url}" rel="noopener">${esc(x.title || "Read the fact-check")}</a>
+          <span class="muted">· ${x.origin === "curated" ? "added by a contributor" : "via the public ClaimReview fact-check feed"}</span></div>
+      </div>`).join("") || `<p class="empty">No fact-checks on file${b ? " in this category" : ""}.${!list.length ? " None of the fact-checkers this site tracks has rated a claim by this official — or none has published it in the public feed. Sourced entries can be added in curated/members/" + m.id + ".json." : ""}</p>`;
+    };
+    el.querySelectorAll("button[data-b]").forEach((btn) => btn.onclick = () => {
+      el.querySelectorAll("button[data-b]").forEach((x) => x.classList.toggle("active", x === btn)); render(btn.dataset.b);
+    });
+    render("");
+  },
+
+  said(el) {
+    const s = [...m.statements].sort((a, b) => b.date.localeCompare(a.date));
+    el.innerHTML = s.length ? s.map((x) => `<div class="card" style="margin-bottom:10px">
+        <div class="small"><b>${esc(x.bill.toUpperCase())}</b>${bills[x.bill]?.title ? " · " + esc(bills[x.bill].title) : ""}</div>
+        ${statementHTML(x)}${(bills[x.bill]?.effects || []).map(effectHTML).join("")}</div>`).join("")
+      : `<p class="empty">No sourced statements on file yet. Statements are added by hand with a link to the original
+         (floor speech, press release, video) in <code>curated/members/${m.id}.json</code>.</p>`;
+  },
+};
+
+const panel = $("#panel");
+function show(tab) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  panel.innerHTML = `<p class="muted">Loading…</p>`;
+  Promise.resolve(tabs[tab](panel)).catch((e) => {
+    panel.innerHTML = `<p class="empty">Couldn't load this section (${esc(e.message)}). <button onclick="location.reload()">Retry</button></p>`;
+  });
+  history.replaceState(null, "", `?id=${m.id}#${tab}`);
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => show(b.dataset.tab));
+show(tabs[location.hash.slice(1)] ? location.hash.slice(1) : "votes");
+footer();
+</script>
+</body>
+</html>

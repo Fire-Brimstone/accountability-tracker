@@ -1,0 +1,12 @@
+{
+  "title": "Short title of the bill",
+  "effects": [
+    {
+      "kind": "projection | measured",
+      "summary": "One or two plain sentences. State numbers and the time window. No adjectives like 'disastrous' or 'historic'.",
+      "source_name": "Who published it (CBO, GAO, BLS, a journal...). Label think tanks by name.",
+      "source_url": "https://direct link to the analysis",
+      "date": "YYYY-MM-DD"
+    }
+  ]
+}

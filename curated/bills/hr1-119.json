@@ -1,0 +1,19 @@
+{
+  "title": "An act to provide for reconciliation pursuant to title II of H. Con. Res. 14 (Public Law 119-21, signed July 4, 2025)",
+  "effects": [
+    {
+      "kind": "projection",
+      "summary": "Increases federal deficits by $3.4 trillion over 2025–2034 relative to CBO's January 2025 baseline: a $4.5 trillion reduction in revenues partly offset by a $1.1 trillion reduction in direct spending.",
+      "source_name": "Congressional Budget Office",
+      "source_url": "https://www.cbo.gov/publication/61570",
+      "date": "2025-07-21"
+    },
+    {
+      "kind": "projection",
+      "summary": "Increases the number of people without health insurance by 10 million in 2034 (1.3 million in 2026, 5.2 million in 2027), about 7.5 million of them from Medicaid and CHIP changes. Does not include the separate effect of enhanced Marketplace subsidies expiring.",
+      "source_name": "Congressional Budget Office letter of Aug. 11, 2025, as summarized by Georgetown University Center for Children and Families",
+      "source_url": "https://ccf.georgetown.edu/2025/08/14/new-cbo-health-coverage-estimates-of-budget-reconciliation-law/",
+      "date": "2025-08-11"
+    }
+  ]
+}

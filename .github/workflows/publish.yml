@@ -1,0 +1,71 @@
+# Rebuilds all data from public bulk sources every night and publishes site/ to GitHub Pages.
+# No API keys or secrets are used. GITHUB_TOKEN is the runner's own built-in token, used only to
+# read the public openstates/people listing without hitting GitHub's anonymous rate limit.
+name: Rebuild and publish
+
+on:
+  schedule:
+    - cron: "17 9 * * *"   # daily, ~3 AM Mountain
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Start from the last successful build, so if one source is down tonight
+      # the site keeps yesterday's data for it instead of losing it.
+      - name: Restore previous data
+        uses: actions/cache/restore@v4
+        with:
+          path: site/data
+          key: site-data-${{ github.run_id }}
+          restore-keys: site-data-
+
+      - name: Build Congress
+        run: python pipeline/build.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Colorado
+        run: python pipeline/build_state.py --state co
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save data for tomorrow
+        uses: actions/cache/save@v4
+        with:
+          path: site/data
+          key: site-data-${{ github.run_id }}
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

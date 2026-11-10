@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Public Record Monitor</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site"><div class="wrap">
+  <h1><a href="index.html">Public Record Monitor</a></h1>
+  <nav><a href="index.html">Officials</a><a href="methodology.html">Methodology</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="muted">Elected officials — U.S. Congress, Colorado state government, and Colorado mayors: how they vote,
+    what they write, who funds them, and how often independent fact-checkers rated their claims false.
+    Every number links to its public source.</p>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="Search by name, state or city (e.g. “CO”, “Denver”, “Warren”)" aria-label="Search">
+    <select id="level" aria-label="Level"><option value="">All levels</option><option value="federal">Federal</option><option value="state">State</option><option value="local">Local</option></select>
+    <select id="chamber" aria-label="Office"><option value="">All offices</option>
+      <option value="senate">U.S. Senate</option><option value="house">U.S. House</option>
+      <option value="executive">Statewide executive</option><option value="state-senate">State Senate</option>
+      <option value="state-house">State House</option><option value="mayor">Mayor</option></select>
+    <select id="party" aria-label="Party"><option value="">All parties</option></select>
+    <select id="state" aria-label="State"><option value="">All states</option></select>
+  </div>
+  <p class="small muted" id="count"></p>
+
+  <div class="table-wrap">
+    <table id="tbl">
+      <thead><tr>
+        <th data-k="name">Name</th>
+        <th data-k="state">Seat</th>
+        <th data-k="missed_pct" class="num" title="Share of eligible roll-call votes missed">Missed votes</th>
+        <th data-k="party_pct" class="num hide-sm" title="Share of yes/no votes matching their party's majority">With party</th>
+        <th data-k="sponsored" class="num hide-sm">Bills sponsored</th>
+        <th data-k="raised" class="num">Raised (latest cycle)</th>
+        <th data-k="false" class="num" title="Statements rated False / Pants on Fire / 3–4 Pinocchios by IFCN fact-checkers">Rated false</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</main>
+<footer><div class="wrap"></div></footer>
+
+<script type="module">
+import { $, esc, money, pct, partyLetter, seat, getJSON, footer } from "./common.js";
+
+const manifest = await getJSON("data/manifest.json");
+const rows = (await Promise.all(manifest.indexes.map((x) => getJSON(`data/${x.file}`)))).flat();
+const states = [...new Set(rows.map((r) => r.state))].sort();
+$("#state").insertAdjacentHTML("beforeend", states.map((s) => `<option>${s}</option>`).join(""));
+const parties = [...new Set(rows.map((r) => r.party).filter(Boolean))].sort();
+$("#party").insertAdjacentHTML("beforeend", parties.map((s) => `<option>${esc(s)}</option>`).join(""));
+const FILTERS = ["q", "level", "chamber", "party", "state"];
+
+const params = new URLSearchParams(location.search);
+for (const k of FILTERS) if (params.get(k)) $("#" + k).value = params.get(k);
+
+let sortKey = "state", sortDir = 1;
+function render() {
+  const q = $("#q").value.trim().toLowerCase();
+  const ch = $("#chamber").value, pa = $("#party").value, st = $("#state").value, lv = $("#level").value;
+  let list = rows.filter((r) =>
+    (!lv || r.level === lv) && (!ch || r.chamber === ch) && (!pa || r.party === pa) && (!st || r.state === st) &&
+    (!q || r.name.toLowerCase().includes(q) || r.state.toLowerCase() === q || (r.jurisdiction || "").toLowerCase().includes(q)));
+  list.sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (x == null) return 1; if (y == null) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
+  });
+  $("#count").textContent = `${list.length} officials`;
+  $("#tbl tbody").innerHTML = list.map((r) => `
+    <tr class="clickable" data-id="${r.id}">
+      <td><a href="member.html?id=${r.id}">${esc(r.name)}</a> <span class="chip party-${partyLetter(r.party)}">${partyLetter(r.party)}</span></td>
+      <td>${esc(r.seat || seat(r))}</td>
+      <td class="num">${pct(r.missed_pct)}</td>
+      <td class="num hide-sm">${pct(r.party_pct)}</td>
+      <td class="num hide-sm">${r.sponsored ?? "—"}${r.sponsored_law ? ` <span class="small muted">(${r.sponsored_law} law)</span>` : ""}</td>
+      <td class="num">${money(r.raised)}${r.cycle ? ` <span class="small muted">’${String(r.cycle).slice(2)}</span>` : ""}</td>
+      <td class="num">${r.checked ? `<b class="${r.false ? "b-false" : ""}">${r.false}</b> <span class="small muted">of ${r.checked}</span>` : `<span class="muted">—</span>`}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="empty">No officials match.</td></tr>`;
+  const p = new URLSearchParams();
+  for (const k of FILTERS) if ($("#" + k).value) p.set(k, $("#" + k).value);
+  history.replaceState(null, "", p.toString() ? "?" + p : location.pathname);
+}
+for (const id of FILTERS) $("#" + id).addEventListener("input", render);
+document.querySelectorAll("th[data-k]").forEach((th) => th.addEventListener("click", () => {
+  const k = th.dataset.k;
+  sortDir = sortKey === k ? -sortDir : (["name", "state"].includes(k) ? 1 : -1);
+  sortKey = k; render();
+}));
+$("#tbl tbody").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr[data-id]");
+  if (tr && !e.target.closest("a")) location.href = `member.html?id=${tr.dataset.id}`;
+});
+render();
+footer();
+</script>
+</body>
+</html>

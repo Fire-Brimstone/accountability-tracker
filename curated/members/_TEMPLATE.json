@@ -1,0 +1,22 @@
+{
+  "_comment": "Rename to <bioguide-id>.json (find the ID in the URL of the member's page, e.g. member.html?id=J000299). Entries without a source are dropped by the build.",
+  "statements": [
+    {
+      "bill": "hr1-119",
+      "date": "YYYY-MM-DD",
+      "quote": "Exact words, verbatim. Use [...] for omissions; never paraphrase.",
+      "context": "Floor speech / press release / interview with X",
+      "source_url": "https://congress.gov/congressional-record/... or the official press release or video"
+    }
+  ],
+  "fact_checks": [
+    {
+      "claim": "The statement as the fact-checker quoted it",
+      "date": "YYYY-MM-DD",
+      "rating": "The fact-checker's exact rating text, e.g. 'Pants on Fire' or 'Four Pinocchios'",
+      "publisher": "PolitiFact",
+      "url": "https://link to the fact-check article",
+      "title": "Headline of the fact-check"
+    }
+  ]
+}

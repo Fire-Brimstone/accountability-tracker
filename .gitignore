@@ -1,0 +1,6 @@
+.cache/
+__pycache__/
+.env
+.claude/
+site/data/
+site/METHODOLOGY.md

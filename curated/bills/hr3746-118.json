@@ -1,0 +1,19 @@
+{
+  "title": "Fiscal Responsibility Act of 2023 (Public Law 118-5)",
+  "effects": [
+    {
+      "kind": "projection",
+      "summary": "Reduces federal deficits by about $1.5 trillion over 2023–2033, mostly through caps on discretionary spending; also suspends the debt limit through January 1, 2025.",
+      "source_name": "Congressional Budget Office",
+      "source_url": "https://www.cbo.gov/publication/59225",
+      "date": "2023-05-30"
+    },
+    {
+      "kind": "projection",
+      "summary": "Argues the realized savings will likely be smaller than CBO's official score because of reported side agreements that loosen the spending caps.",
+      "source_name": "Committee for a Responsible Federal Budget (fiscal-hawk think tank)",
+      "source_url": "https://www.crfb.org/blogs/how-much-would-fiscal-responsibility-act-save",
+      "date": "2023-06"
+    }
+  ]
+}
